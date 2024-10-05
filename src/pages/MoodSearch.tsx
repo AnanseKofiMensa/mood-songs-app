@@ -1,45 +1,80 @@
-// src/pages/MoodSearch.tsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { FaMusic, FaPlus } from 'react-icons/fa'; // Import Music and Plus icons
 
 function MoodSearch() {
-  const [token, setToken] = useState<string | null>(null);
-  const [mood, setMood] = useState<string>('');
-  const [songRecommendations, setSongRecommendations] = useState<any[]>([]);
+  const [mood, setMood] = useState<string>(''); // User's mood input
+  const [recommendations, setRecommendations] = useState<any[]>([]); // Store Spotify songs
   const [playlistId, setPlaylistId] = useState<string | null>(null); // Store the created playlist ID
+  const [loading, setLoading] = useState<boolean>(false); // Loading state for API requests
   const [playlistCreated, setPlaylistCreated] = useState<boolean>(false);
 
-  useEffect(() => {
-    const storedToken = window.localStorage.getItem('token');
-    if (storedToken) {
-      setToken(storedToken);
-    }
-  }, []);
+  const spotifyToken = window.localStorage.getItem('token'); // Spotify access token from login
 
-  const searchSongs = async () => {
-    if (!token || mood.trim() === '') return;
+  const handleMoodChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMood(e.target.value);
+  };
 
+  // Fetch song recommendations from ChatGPT
+  const getChatGPTRecommendations = async () => {
+    setLoading(true); // Start loading
     try {
-      const response = await axios.get(
-        `https://api.spotify.com/v1/search?q=${encodeURIComponent(mood)}&type=track&limit=10`,
+      const response = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful assistant that provides music recommendations.',
+            },
+            {
+              role: 'user',
+              content: `Suggest me a list of 10 songs that match the mood: "${mood}".`,
+            },
+          ],
+          max_tokens: 150,
+          temperature: 0.7,
+        },
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`, // OpenAI API Key
           },
         }
       );
-      setSongRecommendations(response.data.tracks.items);
+
+      // Parse the response from ChatGPT
+      const recommendationsText = response.data.choices[0].message.content.trim();
+      const songTitles = recommendationsText.split('\n').filter(Boolean); // Get song titles
+
+      // Search for each song on Spotify and get its data
+      const spotifySongs = await Promise.all(
+        songTitles.map(async (title) => {
+          const spotifyResponse = await axios.get(
+            `https://api.spotify.com/v1/search?q=${encodeURIComponent(title)}&type=track&limit=1`,
+            {
+              headers: {
+                Authorization: `Bearer ${spotifyToken}`,
+              },
+            }
+          );
+          return spotifyResponse.data.tracks.items[0]; // Return the first match
+        })
+      );
+
+      setRecommendations(spotifySongs); // Set Spotify songs in state
     } catch (error) {
-      console.error('Error fetching song recommendations:', error);
+      console.error('Error fetching recommendations:', error);
+    } finally {
+      setLoading(false); // End loading
     }
   };
 
+  // Create a playlist on Spotify
   const createPlaylist = async () => {
-    if (!token || mood.trim() === '') return;
+    if (!spotifyToken || mood.trim() === '') return;
 
     try {
-      // Create a new playlist
       const response = await axios.post(
         'https://api.spotify.com/v1/me/playlists',
         {
@@ -49,7 +84,7 @@ function MoodSearch() {
         },
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${spotifyToken}`,
           },
         }
       );
@@ -60,11 +95,9 @@ function MoodSearch() {
     }
   };
 
+  // Add a song to the playlist
   const addSongToPlaylist = async (trackUri: string) => {
-    if (!token || !playlistId) {
-      console.error('No playlist to add songs to!');
-      return;
-    }
+    if (!spotifyToken || !playlistId) return;
 
     try {
       await axios.post(
@@ -72,8 +105,8 @@ function MoodSearch() {
         { uris: [trackUri] },
         {
           headers: {
-            Authorization: `Bearer ${token}`,
-          }
+            Authorization: `Bearer ${spotifyToken}`,
+          },
         }
       );
       alert('Song added to playlist!');
@@ -90,42 +123,43 @@ function MoodSearch() {
           type="text"
           placeholder="Enter your mood"
           value={mood}
-          onChange={(e) => setMood(e.target.value)}
+          onChange={handleMoodChange}
         />
-        <button onClick={searchSongs}>
-          <FaMusic /> Search Songs
+        <button onClick={getChatGPTRecommendations}>
+          {loading ? 'Loading...' : 'Get Song Recommendations'}
         </button>
       </div>
 
-      {/* Create Playlist Button */}
       {!playlistId && (
         <div style={{ marginTop: '10px' }}>
           <button onClick={createPlaylist}>
-            <FaPlus /> Create Playlist Based on Mood
+            {playlistCreated ? 'Playlist Created!' : 'Create Playlist Based on Mood'}
           </button>
         </div>
       )}
 
-      {playlistCreated && <p>Playlist created successfully!</p>}
-
-      <h3>Song Recommendations</h3>
-      <ul>
-        {songRecommendations.map((song) => (
-          <li key={song.id}>
-            <div className="song-info">
-              <img src={song.album.images[0]?.url} alt={song.name} />
-              <div className="song-details">
-                <strong>{song.name}</strong> by {song.artists.map((artist: any) => artist.name).join(', ')}
-              </div>
-            </div>
-            {playlistId && (
-              <button onClick={() => addSongToPlaylist(song.uri)}>
-                <FaPlus /> Add
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+      {recommendations.length > 0 && (
+        <div>
+          <h3>Recommended Songs for Mood "{mood}"</h3>
+          <ul>
+            {recommendations.map((song, index) => (
+              <li key={song.id}>
+                <div className="song-info">
+                  <img src={song.album.images[0]?.url} alt={song.name} />
+                  <div className="song-details">
+                    <strong>{song.name}</strong> by {song.artists.map((artist: any) => artist.name).join(', ')}
+                  </div>
+                </div>
+                {playlistId && (
+                  <button onClick={() => addSongToPlaylist(song.uri)}>
+                    Add to Playlist
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

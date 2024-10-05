@@ -8,6 +8,7 @@ function EditPlaylist() {
   const { id } = useParams(); // Get playlist ID from URL
   const [token, setToken] = useState<string | null>(null);
   const [playlist, setPlaylist] = useState<any | null>(null);
+  const [isRemoving, setIsRemoving] = useState<boolean>(false); // Loading state for removal
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem('token');
@@ -31,6 +32,7 @@ function EditPlaylist() {
   };
 
   const removeSong = async (trackUri: string) => {
+    setIsRemoving(true);
     try {
       await axios.delete(`https://api.spotify.com/v1/playlists/${id}/tracks`, {
         headers: {
@@ -50,6 +52,8 @@ function EditPlaylist() {
       });
     } catch (error) {
       console.error('Error removing song:', error);
+    } finally {
+      setIsRemoving(false);
     }
   };
 
@@ -62,13 +66,13 @@ function EditPlaylist() {
             {playlist.tracks.items.map((item: any) => (
               <li key={item.track.id}>
                 <div className="song-info">
-                  <img src={item.track.album.images[0]?.url} alt={item.track.name} />
+                  <img src={item.track.album.images[0]?.url || 'https://via.placeholder.com/50'} alt={item.track.name} />
                   <div className="song-details">
                     <strong>{item.track.name}</strong> by {item.track.artists.map((artist: any) => artist.name).join(', ')}
                   </div>
                 </div>
-                <button onClick={() => removeSong(item.track.uri)}>
-                  <FaTrash /> {/* Trash Icon */}
+                <button onClick={() => removeSong(item.track.uri)} disabled={isRemoving}>
+                  <FaTrash /> Remove
                 </button>
               </li>
             ))}
